@@ -1,0 +1,54 @@
+@startuml C3_Option_A
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Camera Gateway + Incident Detection Service -- C3\nВариант A: прямая интеграция (RTSP/ONVIF)
+
+System_Ext(cameras, "Камеры видеонаблюдения", "Разные производители")
+Container(herd, "Herd Analytics Service", "Ruby", "Потребитель батча")
+Container(local_notify, "Local Notification Service", "Ruby", "Локальное оповещение дежурного")
+ContainerDb(outbox, "Local Event Outbox", "SQLite", "Durable-очередь")
+Container(farm_gw, "Farm Sync Gateway", "Ruby", "Центральный прием (fast-path)")
+
+Container_Boundary(cam_gw, "Camera Gateway") {
+  Component(adapter_pool, "Protocol Adapter Pool", "per-vendor adapters", "Один адаптер на модель/вендора камеры -- обнаружение по ONVIF и сглаживание несовместимостей реализаций RTSP/ONVIF")
+  Component(stream_reader, "RTSP Stream Reader", "GStreamer", "Прием видеопотока с каждой камеры")
+  Component(decoder, "Frame Decoder", "GStreamer, H.264/H.265", "Декодирует поток в кадры")
+  Component(health, "Camera Health Monitor", "Ruby", "Следит за связью/FPS по каждой камере, фиксирует слепые зоны")
+  Component(publisher, "Frame Publisher", "internal pub/sub", "Публикует нормализованные кадры внутренним потребителям")
+}
+
+Container_Boundary(incident, "Incident Detection Service") {
+  Component(frame_buf, "Frame Buffer", "Ring buffer", "Держит последние N кадров с таймстампом для окна инференса")
+  Component(preproc, "Preprocessing", "OpenCV", "Нормализация, усиление в темноте, коррекция дисторсии fisheye")
+  Component(infer, "ML Inference Engine", "Ruby", "Модель партнеров: детекция драк/беспокойства и задавливания поросят")
+  Component(tracker, "Animal Tracker", "Cеть переидентификации", "Трекинг особей между кадрами, несмотря на визуальное сходство")
+  Component(classifier, "Incident Classifier", "Rules engine", "Комбинирует вывод модели и трекера, определяет тип/серьезность инцидента")
+  Component(dispatcher, "Alert Dispatcher", "Ruby", "Рассылает классифицированный инцидент по всем каналам одновременно")
+  Component(watchdog, "SLA Watchdog", "Ruby", "Меряет задержку от кадра до диспетчеризации, следит за <=5с (P1)")
+}
+
+Rel(cameras, adapter_pool, "Обнаружение и регистрация", "ONVIF")
+Rel(adapter_pool, stream_reader, "Открывает поток по протоколу вендора")
+Rel(cameras, stream_reader, "Видеопоток", "RTSP")
+Rel(stream_reader, decoder, "Сырой поток")
+Rel(decoder, publisher, "Декодированные кадры")
+Rel(stream_reader, health, "Метрики связи/FPS")
+
+Rel(publisher, frame_buf, "Кадры (стрим)", "internal")
+Rel(publisher, herd, "Кадры (батч-сэмпл)", "internal")
+
+Rel(frame_buf, preproc, "Кадр + таймстамп")
+Rel(preproc, infer, "Нормализованный кадр")
+Rel(infer, tracker, "Сырые детекции")
+Rel(tracker, classifier, "Детекции + треки особей")
+Rel(classifier, dispatcher, "Классифицированный инцидент")
+
+Rel(dispatcher, local_notify, "Локальный алерт", "internal, синхронно")
+Rel(dispatcher, outbox, "Запись события", "internal, durable")
+Rel(dispatcher, farm_gw, "Fast-path алерт (если есть связь)", "MQTT/WebSocket")
+
+Rel(frame_buf, watchdog, "Таймстамп кадра")
+Rel(dispatcher, watchdog, "Таймстамп диспетчеризации")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,24 @@
+@startuml C2_Isolation_DB_Per_Tenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Мультитенантность -- вариант 2: изоляция на уровне отдельных БД
+
+Container(app, "Application Tier", "Все сервисы платформы (не меняются между вариантами изоляции)")
+Container(provisioning_trigger, "Subscription & Plan Service", "Запускает онбординг нового тенанта")
+
+Container_Boundary(data, "Data Layer") {
+  Component(router, "Tenant Connection Router", "Выбирает пул соединений тенанта из реестра")
+  ContainerDb(registry, "Tenant Database Registry", "PostgreSQL", "tenant_id -> connection string")
+  Component(db_prov, "Database Provisioning Service", "Создает новую БД + прогоняет миграции при онбординге")
+  ContainerDb(tenant_db, "Per-Tenant Database", "PostgreSQL (x N)", "Отдельная база на каждого тенанта в общем кластере")
+}
+
+Rel(app, router, "Запрос с tenant_id")
+Rel(router, registry, "Ищет connection string")
+Rel(router, tenant_db, "Запрос к БД тенанта", "SQL, отдельный пул соединений")
+Rel(provisioning_trigger, db_prov, "Новый тенант / апгрейд")
+Rel(db_prov, tenant_db, "CREATE DATABASE + migrate")
+Rel(db_prov, registry, "Регистрирует connection string")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,33 @@
+@startuml C2_Isolation_Virtual_Instance_Per_Tenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Мультитенантность -- вариант 3а: выделенная виртуальная машина на тенанта
+
+Container(app, "Application Tier", "Все сервисы платформы (не меняются между вариантами изоляции)")
+Container(provisioning_trigger, "Subscription & Plan Service", "Запускает онбординг нового тенанта")
+
+Container_Boundary(data, "Data Layer") {
+  Component(router, "Tenant Instance Router", "Резолвит эндпоинт выделенной VM тенанта")
+  ContainerDb(registry, "Tenant Instance Registry", "PostgreSQL", "tenant_id -> endpoint VM")
+  Component(vm_prov, "VM Provisioning Service", "IaC (Terraform + Cloud API)", "Разворачивает новую виртуальную машину с БД на онбординге")
+  ContainerDb(tenant_vm, "Dedicated DB VM", "PostgreSQL на выделенной VM (x N)", "Отдельные vCPU/RAM/диск на тенанта, но физический хост-гипервизор может быть общим с VM других тенантов")
+}
+
+Rel(app, router, "Запрос с tenant_id")
+Rel(router, registry, "Ищет endpoint VM")
+Rel(router, tenant_vm, "Запрос к выделенной VM", "SQL")
+Rel(provisioning_trigger, vm_prov, "Новый тенант (например, Business-план)")
+Rel(vm_prov, tenant_vm, "Provision + migrate")
+Rel(vm_prov, registry, "Регистрирует endpoint")
+
+note right of tenant_vm
+  VM изолирует CPU/RAM/диск на уровне
+  гипервизора, но несколько VM разных
+  тенантов могут жить на одном физическом
+  хосте -- отсюда остаточный риск
+  "шумного соседа" (CPU steal time,
+  конкуренция за I/O хоста)
+end note
+
+SHOW_LEGEND()
+@enduml

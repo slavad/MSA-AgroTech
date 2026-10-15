@@ -1,0 +1,34 @@
+@startuml C2_Isolation_Physical_Instance_Per_Tenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Мультитенантность -- вариант 3б: выделенный физический сервер на тенанта
+
+Container(app, "Application Tier", "Все сервисы платформы (не меняются между вариантами изоляции)")
+Container(provisioning_trigger, "Subscription & Plan Service", "Запускает онбординг нового тенанта")
+
+Container_Boundary(data, "Data Layer") {
+  Component(router, "Tenant Instance Router", "Резолвит эндпоинт выделенного сервера тенанта")
+  ContainerDb(registry, "Tenant Instance Registry", "PostgreSQL", "tenant_id -> endpoint физического сервера")
+  Component(hw_prov, "Bare-Metal Provisioning Service", "IaC (Terraform + DC runbook)", "Заказывает и разворачивает выделенный физический сервер на онбординге")
+  ContainerDb(tenant_server, "Dedicated Physical Server", "PostgreSQL на выделенном физическом сервере (x N)", "CPU/RAM/диск/сеть полностью изолированы, без гипервизора и без совместного использования с другими тенантами")
+}
+
+Rel(app, router, "Запрос с tenant_id")
+Rel(router, registry, "Ищет endpoint сервера")
+Rel(router, tenant_server, "Запрос к выделенному серверу", "SQL")
+Rel(provisioning_trigger, hw_prov, "Новый тенант (обычно Enterprise-план)")
+Rel(hw_prov, tenant_server, "Provision + migrate")
+Rel(hw_prov, registry, "Регистрирует endpoint")
+
+note right of tenant_server
+  Нет гипервизора и нет совместно
+  используемого физического хоста --
+  "шумный сосед" на уровне инфраструктуры
+  отсутствует как класс. Онбординг
+  медленнее на порядок (заказ и
+  установка оборудования, а не
+  запуск VM по API)
+end note
+
+SHOW_LEGEND()
+@enduml

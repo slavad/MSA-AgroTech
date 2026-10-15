@@ -1,0 +1,112 @@
+@startuml C2_SaaS_Final
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_TOP_DOWN()
+
+title SaaS-платформа мониторинга свиноферм -- C2 (Итоговая архитектура решения)
+
+Person(tenant_operator, "Оператор (тенант)")
+Person(tenant_vet, "Зоотехник (тенант)")
+Person(tenant_duty, "Дежурный на ферме (тенант)")
+Person(tenant_manager, "Руководитель/биллинг-админ (тенант)")
+Person(developer, "Внешний разработчик")
+
+System_Ext(cameras, "Камеры (тенанта)")
+System_Ext(equip, "Кормушки/поилки (тенанта)")
+System_Ext(payments_yookassa, "ЮKassa", "Платежный агрегатор")
+System_Ext(payments_sbp, "СБП", "Система быстрых платежей")
+System_Ext(payments_yandex, "Yandex Pay", "Платежный агрегатор")
+System_Ext(client_systems, "Системы клиента", "ERP/BI тенанта")
+System_Ext(idp_ext, "IdP тенанта (опц.)")
+
+System_Boundary(saas, "SaaS-платформа мониторинга свиноферм") {
+
+  Container_Boundary(agent, "Агент фермы (edge, x N ферм x N тенантов)") {
+    Container(cam_gw, "Camera Gateway", "Ruby", "Интеграция камер -- по решению Task1/Task4 (Вариант A)")
+    Container(incident, "Incident Detection Service", "Ruby", "<=5с локальный алерт (см. Task3)")
+    Container(herd, "Herd Analytics Service", "Ruby")
+    Container(equip_adapter, "Equipment Adapter", "Ruby (rmodbus gem)")
+    ContainerDb(outbox, "Local Event Outbox", "SQLite")
+    Container(sync, "Sync Client", "Ruby (grpc gem)")
+    Container(local_notify, "Local Notification Service", "Ruby")
+  }
+
+  Container_Boundary(core, "Core Domain Services (перенесены из MVP)") {
+    Container(farm_gw, "Farm Sync Gateway", "Ruby", "Теперь помечает события tenant_id")
+    Container(bus, "Event Bus", "Apache Kafka", "Топики/партиции по tenant_id")
+    Container(alerting, "Incident Alerting & Escalation", "Ruby")
+    Container(herd_agg, "Herd Analytics Aggregator", "Ruby")
+    Container(feed_forecast, "Feed Inventory & Forecasting", "Ruby")
+    Container(equip_cfg, "Equipment Config Service", "Ruby")
+  }
+
+  Container_Boundary(platform_svc, "Platform & Tenant Services") {
+    Container(iam, "Identity & Access Service", "Ruby (omniauth/oauth2 gem)", "Тенант-scoped роли + platform admin роль")
+    Container(tenant_prov, "Tenant Provisioning Service", "Ruby", "Оркестрирует онбординг: выбирает стратегию изоляции по плану (см. C2_isolation_*.puml)")
+    Container(data_layer, "Tenant Data Layer", "см. Task5/C2_isolation_*", "Schema / DB / Instance-per-tenant -- по тарифу")
+  }
+
+  Container_Boundary(commerce, "Commerce Services") {
+    Container(plan_svc, "Subscription & Plan Service", "Ruby", "Тарифы, лимиты, фичи по плану")
+    Container(usage, "Usage Metering Service", "Ruby", "Метрики использования на биллинг (фермы, камеры, API-вызовы)")
+    Container(billing, "Billing & Invoicing Service", "Ruby", "Расчет счетов: базовая ставка + перерасход")
+    Container(payment_adapter, "Payment Gateway Adapter", "Ruby", "Интеграция с несколькими платежными системами (ЮKassa, СБП, Yandex Pay); новый провайдер добавляется без изменения остальной архитектуры")
+  }
+
+  Container_Boundary(client_facing, "Client-Facing Services") {
+    Container(api_gw, "Public Client API", "Ruby (Grape + graphql gem)", "Tenant-scoped, версионируемый")
+    Container(self_service, "Self-Service Portal", "React", "Аккаунт, тариф, счета, пользователи тенанта")
+    Container(dev_portal, "Developer Portal", "React + OpenAPI", "Документация, sandbox, self-service API keys")
+  }
+
+  Container(metrics, "Metrics Export Service", "Ruby", "Экспорт в системы клиента через Client API")
+}
+
+Rel(tenant_operator, alerting, "Алерты")
+Rel(tenant_vet, herd_agg, "Отчеты")
+Rel(tenant_duty, local_notify, "Офлайн-уведомления")
+Rel(tenant_manager, self_service, "Тариф, счета, пользователи")
+Rel(developer, dev_portal, "Документация, API keys")
+
+Rel(cameras, cam_gw, "Видео")
+Rel(equip_adapter, equip, "Команды/телеметрия")
+Rel(cam_gw, incident, "Кадры")
+Rel(cam_gw, herd, "Кадры")
+Rel(incident, local_notify, "Локальный алерт")
+Rel(incident, outbox, "Событие")
+Rel(equip_adapter, outbox, "Телеметрия")
+Rel(sync, outbox, "Читает буфер")
+Rel(sync, farm_gw, "Синхронизация, tenant_id")
+
+Rel(farm_gw, bus, "Публикует (tenant_id)")
+Rel(bus, alerting, "Инциденты")
+Rel(bus, herd_agg, "Отчеты")
+Rel(bus, feed_forecast, "Данные по корму")
+Rel(bus, usage, "Использование (фермы, камеры, видео-часы)")
+Rel(bus, metrics, "Все события")
+
+Rel(api_gw, iam, "AuthN/AuthZ по тенанту")
+Rel(api_gw, alerting, "Инциденты тенанта")
+Rel(api_gw, herd_agg, "Отчеты тенанта")
+Rel(api_gw, metrics, "Метрики тенанта")
+Rel(metrics, client_systems, "Экспорт", "REST/webhook")
+Rel(iam, idp_ext, "Федеративная аутентификация (опц.)")
+
+Rel(self_service, plan_svc, "Смена тарифа")
+Rel(dev_portal, api_gw, "Выпуск API key")
+Rel(plan_svc, tenant_prov, "Триггер онбординга/апгрейда")
+Rel(tenant_prov, data_layer, "Выбирает стратегию изоляции по плану")
+Rel(usage, billing, "Данные для расчета счета")
+Rel(plan_svc, billing, "Базовая ставка плана")
+Rel(billing, payment_adapter, "Списание")
+Rel(payment_adapter, payments_yookassa, "Платеж/подписка", "API/webhook")
+Rel(payment_adapter, payments_sbp, "Платеж/подписка", "API/webhook")
+Rel(payment_adapter, payments_yandex, "Платеж/подписка", "API/webhook")
+Rel(billing, self_service, "Счета, история платежей")
+
+Rel(alerting, data_layer, "Чтение/запись per-tenant данных")
+Rel(herd_agg, data_layer, "Чтение/запись per-tenant данных")
+Rel(billing, data_layer, "Чтение/запись per-tenant данных")
+Rel(plan_svc, data_layer, "Чтение/запись per-tenant данных")
+
+SHOW_LEGEND()
+@enduml

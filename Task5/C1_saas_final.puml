@@ -1,0 +1,46 @@
+@startuml C1_SaaS_Final
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title SaaS-платформа мониторинга свиноферм -- C1 (Итоговая архитектура решения)
+
+Person(tenant_operator, "Оператор (тенант)", "Отслеживает алерты своих ферм")
+Person(tenant_vet, "Зоотехник/ветеринар (тенант)", "Отчеты по своему поголовью")
+Person(tenant_duty, "Дежурный на ферме (тенант)", "Локальные офлайн-уведомления")
+Person(tenant_manager, "Руководитель / биллинг-админ (тенант)", "Метрики, тариф, счета своей компании")
+Person(developer, "Внешний разработчик", "Интегрирует системы клиента через API, пользуется dev-порталом")
+Person(platform_admin, "Команда АгроТех Х (оператор платформы)", "Внутренние операции платформы; выделенного UI пока нет")
+
+System(saas, "SaaS-платформа мониторинга свиноферм", "Многотенантная платформа: центральный сервер + агенты на фермах каждого клиента")
+
+System_Ext(cameras, "Камеры видеонаблюдения", "Разных производителей, на фермах каждого тенанта")
+System_Ext(equip, "Кормушки и поилки", "Разных производителей, на фермах каждого тенанта")
+System_Ext(payments_yookassa, "ЮKassa", "Платежный агрегатор")
+System_Ext(payments_sbp, "СБП", "Система быстрых платежей")
+System_Ext(payments_yandex, "Yandex Pay", "Платежный агрегатор")
+System_Ext(client_systems, "Системы клиента", "ERP/BI/др. -- у каждого тенанта свои; пример -- Task5/C2_integration-example")
+System_Ext(idp, "IdP тенанта (опционально)", "Федеративный SSO для корпоративных клиентов")
+
+Rel(tenant_operator, saas, "Алерты, видео")
+Rel(tenant_vet, saas, "Отчеты о состоянии стада")
+Rel(tenant_duty, saas, "Офлайн-уведомления")
+Rel(tenant_manager, saas, "Метрики, тариф, счета")
+Rel(developer, saas, "API, документация, sandbox")
+Rel(platform_admin, saas, "Онбординг тенантов, эксплуатация (внутренние инструменты)")
+
+Rel(cameras, saas, "Видеопоток")
+Rel(saas, equip, "Команды управления")
+Rel(equip, saas, "Телеметрия")
+Rel(saas, payments_yookassa, "Списание оплаты подписки", "API/webhook")
+Rel(saas, payments_sbp, "Списание оплаты подписки", "API/webhook")
+Rel(saas, payments_yandex, "Списание оплаты подписки", "API/webhook")
+
+note right of payments_yandex
+  Набор платежных систем расширяемый --
+  новый провайдер добавляется без
+  изменения остальной архитектуры
+end note
+Rel(saas, client_systems, "Экспорт метрик/событий через Client API", "REST/webhook")
+Rel(saas, idp, "Федеративная аутентификация (если настроено тенантом)")
+
+SHOW_LEGEND()
+@enduml

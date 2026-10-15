@@ -1,0 +1,42 @@
+@startuml C2_Integration_Example_AgroTech_X
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Пример интеграции -- АгроТех Х как тенант SaaS-платформы
+
+Person(operator, "Оператор мониторинга (АгроТех Х)")
+Person(vet, "Зоотехник (АгроТех Х)")
+Person(duty, "Дежурный на ферме (АгроТех Х)")
+Person(manager, "Руководитель хозяйства (АгроТех Х)")
+
+System_Ext(farms, "Фермы АгроТех Х", "N ферм, каждая -- агент SaaS-платформы (см. Task2/C2_option-A)")
+System_Ext(corp, "Корпоративная платформа АгроТех Х", "Kafka / DWH / BI / ERP (1С:Агро) -- та же система, что в Task1/agrotech.puml")
+
+System_Boundary(saas, "SaaS-платформа мониторинга свиноферм") {
+  Container(api_gw, "Public Client API", "Ruby (Grape + graphql gem)", "tenant = agrotech-x")
+  Container(metrics, "Metrics Export Service", "Ruby")
+  Container(alerting, "Incident Alerting & Escalation", "Ruby")
+  Container(herd_agg, "Herd Analytics Aggregator", "Ruby")
+  Container(self_service, "Self-Service Portal", "React")
+  ContainerDb(data_layer, "Tenant Data Layer (agrotech-x)", "изолирован согласно тарифу АгроТех Х")
+}
+
+Rel(farms, saas, "Видео, телеметрия, инциденты", "через Farm Sync Gateway, см. C2_saas_final.puml")
+
+Rel(operator, alerting, "Алерты своих ферм")
+Rel(vet, herd_agg, "Отчеты по своим фермам")
+Rel(duty, farms, "Локальные офлайн-уведомления (на месте, без участия SaaS)")
+Rel(manager, self_service, "Тариф, счета, метрики")
+
+Rel(metrics, corp, "Экспорт базовых + кастомных метрик", "REST/Kafka -- тот же контракт, что в Task1/Task2 MVP")
+Rel(corp, api_gw, "Опционально: обратный запрос данных/конфигурации", "REST, в рамках scope Client API")
+
+note bottom of corp
+  До SaaS-миграции (Task1-4) АгроТех Х
+  была единственным владельцем платформы.
+  Теперь это тот же контур интеграции,
+  но АгроТех Х -- тенант №1 среди прочих
+  клиентов SaaS-платформы.
+end note
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,95 @@
+@startuml C2_Option_B_Vendor_Cloud_Integration
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_TOP_DOWN()
+
+title Платформа мониторинга свиноферм -- C2\nВариант B: интеграция через облачные платформы производителей
+
+Person(operator, "Оператор мониторинга")
+Person(vet, "Зоотехник / ветеринар")
+Person(duty, "Дежурный на ферме")
+Person(manager, "Руководитель хозяйства")
+
+System_Ext(camera_cloud, "Облако производителей камер")
+System_Ext(equip_cloud, "Облако производителей кормового оборудования")
+System_Ext(water, "Фильтрация воды")
+System_Ext(corp, "Корпоративная платформа", "BI / ERP / 1C")
+System_Ext(idp, "External Identity Provider")
+System_Ext(client, "Моб./веб-приложения")
+
+System_Boundary(platform, "Платформа мониторинга свиноферм") {
+
+  Container_Boundary(agent, "Агент фермы (edge)") {
+    Container(cam_gw, "Camera Gateway", "Ruby, vendor SDK/webhook")
+    Container(incident, "Incident Detection Service", "Ruby", "SLA <=5с (P1)")
+    Container(herd, "Herd Analytics Service", "Ruby")
+    Container(equip_adapter, "Equipment Adapter", "Ruby (HTTP client, vendor SDK)")
+    Container(feed_sensor, "Feed Sensor Adapter", "Ruby")
+    ContainerDb(outbox, "Local Event Outbox", "SQLite")
+    Container(sync, "Sync Client", "Ruby (grpc gem)")
+    Container(local_notify, "Local Notification Service", "Ruby")
+    Container(auth_cache, "Local Auth Cache", "Ruby")
+  }
+
+  Container_Boundary(center, "Центральный сервер") {
+    Container(farm_gw, "Farm Sync Gateway", "Ruby (grpc gem / HTTPS)")
+    Container(bus, "Event Bus", "Apache Kafka")
+    Container(alerting, "Incident Alerting & Escalation", "Ruby")
+    Container(herd_agg, "Herd Analytics Aggregator", "Ruby")
+    Container(feed_forecast, "Feed Inventory & Forecasting", "Ruby")
+    Container(equip_cfg, "Equipment Config Service", "Ruby")
+    Container(metrics, "Metrics Export Service", "Ruby")
+    Container(iam, "Identity & Access Service", "Ruby (omniauth/oauth2 gem)")
+    Container(api_gw, "API Gateway", "Ruby (Grape + graphql gem)")
+    ContainerDb(op_db, "Operational DB", "PG SQL")
+    ContainerDb(ts_db, "Timeseries DB", "Timescale DB")
+  }
+}
+
+Rel(operator, alerting, "Отслеживает алерты")
+Rel(vet, herd_agg, "Просматривает отчеты")
+Rel(duty, local_notify, "Получает офлайн-уведомления")
+Rel(manager, api_gw, "Метрики, отчеты")
+
+' --- 1-3: камеры и видеоаналитика ---
+Rel(camera_cloud, cam_gw, "Видео/события", "HTTPS, Vendor Cloud API -- best-effort, at least once (зависит от вендора)")
+Rel(cam_gw, incident, "Кадры", "внутри агента, at most once -- пара кадров погоды не сделает")
+Rel(cam_gw, herd, "Кадры (батч)", "внутренняя очередь агента, at-least-once")
+
+' --- 4-6: инциденты ---
+Rel(incident, local_notify, "Локальный алерт", "внутренний вызов, at least once, idempotent")
+Rel(incident, outbox, "Запись события", "internal write, at least once, durable")
+Rel(incident, farm_gw, "Fast-path алерт", "MQTT (не Kafka -- см. обоснование), at least once, idempotent")
+
+' --- 7-8: оборудование ---
+Rel(equip_adapter, equip_cloud, "Команды / телеметрия", "HTTPS, Vendor Cloud API, at-least-once")
+Rel(water, equip_adapter, "Телеметрия фильтрации", "Modbus/MQTT, best-effort")
+Rel(feed_sensor, outbox, "Показания", "internal write")
+
+' --- 9-13: синхронизация с центром ---
+Rel(sync, outbox, "Читает буфер", "internal, at least once, idempotent")
+Rel(sync, farm_gw, "Батч-синхронизация", "gRPC/HTTPS, at least once, idempotent (event id)")
+Rel(farm_gw, bus, "Публикует события", "Kafka producer, at least once (idempotent producer)")
+Rel(bus, alerting, "Инциденты (batch)", "Kafka consumer, at least once, idempotent (incident id) -- дедуп с fast-path")
+Rel(bus, herd_agg, "Отчеты по стаду", "Kafka consumer, at least once, idempotent")
+Rel(bus, feed_forecast, "Данные по корму", "Kafka consumer, at least once, idempotent")
+Rel(bus, metrics, "Все события", "Kafka consumer, at least once, idempotent")
+Rel(equip_cfg, sync, "Пуш конфигурации", "gRPC/HTTPS, at least once, idempotent")
+
+Rel(bus, op_db, "Инциденты, конфиг")
+Rel(bus, ts_db, "Телеметрия")
+
+' --- 14-17: внешние интеграции ---
+Rel(metrics, corp, "Экспорт метрик", "REST/Kafka, at least once, idempotent (event id)")
+Rel(api_gw, client, "API", "REST, GraphQL -- request/response")
+Rel(api_gw, iam, "AuthN/AuthZ", "OAuth2/OIDC -- request/response")
+Rel(iam, idp, "federated authentication", "OAuth2/OIDC -- request/response")
+Rel(auth_cache, iam, "Кэш токенов (при наличии связи)")
+
+note right of cam_gw
+  Отличие от Варианта A: камеры и
+  кормовое оборудование -- через
+  облако вендора, требует интернет
+end note
+
+SHOW_LEGEND()
+@enduml
