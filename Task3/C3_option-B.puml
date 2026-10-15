@@ -1,0 +1,69 @@
+@startuml C3_Option_B
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Camera Gateway + Incident Detection Service -- C3\nВариант B: облачные платформы производителей
+
+System_Ext(camera_cloud, "Облако производителей камер")
+Container(herd, "Herd Analytics Service", "Ruby", "Потребитель батча")
+Container(local_notify, "Local Notification Service", "Ruby", "Локальное оповещение дежурного")
+ContainerDb(outbox, "Local Event Outbox", "SQLite", "Durable-очередь")
+Container(farm_gw, "Farm Sync Gateway", "Ruby", "Центральный прием (fast-path)")
+
+Container_Boundary(cam_gw, "Camera Gateway") {
+  Component(sdk_pool, "Vendor SDK Client Pool", "per-vendor SDK/HTTP клиенты", "Один клиент на облако вендора")
+  Component(ingestion, "Vendor Event Ingestion", "HTTPS endpoint + Ruby (whenever gem)", "Прием push-событий (webhook) либо опрос (polling) -- режим зависит от возможностей конкретного вендора")
+  Component(auth_mgr, "Vendor Auth Token Manager", "OAuth2/API key", "Хранит и обновляет учетные данные для каждого вендорского облака -- компонент, отсутствующий в Варианте A")
+  Component(normalizer, "Response Normalizer", "Ruby", "Приводит разные вендорские форматы к единому внутреннему формату кадра/события")
+  Component(health, "Vendor API Health Monitor", "Ruby", "Следит за доступностью/латентностью/лимитами rate-limit каждого вендорского API")
+  Component(publisher, "Frame Publisher", "internal pub/sub", "Публикует нормализованные кадры внутренним потребителям")
+}
+
+Container_Boundary(incident, "Incident Detection Service") {
+  Component(frame_buf, "Frame Buffer", "Ring buffer", "Держит последние N кадров с таймстампом для окна инференса")
+  Component(preproc, "Preprocessing", "OpenCV", "Нормализация, усиление в темноте, коррекция дисторсии fisheye")
+  Component(infer, "ML Inference Engine", "Ruby", "Модель партнеров: детекция драк/беспокойства и задавливания поросят")
+  Component(tracker, "Animal Tracker", "Cеть переидентификации", "Трекинг особей между кадрами, несмотря на визуальное сходство")
+  Component(classifier, "Incident Classifier", "Rules engine", "Комбинирует вывод модели и трекера, определяет тип/серьезность инцидента")
+  Component(dispatcher, "Alert Dispatcher", "Ruby", "Рассылает классифицированный инцидент по всем каналам одновременно")
+  Component(watchdog, "SLA Watchdog", "Ruby", "Меряет задержку от кадра до диспетчеризации, следит за <=5с (P1)")
+}
+
+Rel(camera_cloud, ingestion, "Push-события/видео либо опрос", "HTTPS webhook / polling, требует интернет")
+Rel(sdk_pool, auth_mgr, "Запрашивает актуальный токен")
+Rel(auth_mgr, camera_cloud, "Обновление токена", "OAuth2")
+Rel(ingestion, sdk_pool, "Событие -> клиент вендора")
+Rel(sdk_pool, normalizer, "Вендор-специфичный payload")
+Rel(normalizer, publisher, "Нормализованные кадры/события")
+Rel(sdk_pool, health, "Метрики доступности/лимитов")
+
+Rel(publisher, frame_buf, "Кадры (стрим)", "internal")
+Rel(publisher, herd, "Кадры (батч-сэмпл)", "internal")
+
+Rel(frame_buf, preproc, "Кадр + таймстамп")
+Rel(preproc, infer, "Нормализованный кадр")
+Rel(infer, tracker, "Сырые детекции")
+Rel(tracker, classifier, "Детекции + треки особей")
+Rel(classifier, dispatcher, "Классифицированный инцидент")
+
+Rel(dispatcher, local_notify, "Локальный алерт", "internal, синхронно")
+Rel(dispatcher, outbox, "Запись события", "internal, durable")
+Rel(dispatcher, farm_gw, "Fast-path алерт (если есть связь)", "MQTT/WebSocket")
+
+Rel(frame_buf, watchdog, "Таймстамп кадра")
+Rel(dispatcher, watchdog, "Таймстамп диспетчеризации")
+
+note right of auth_mgr
+  Новый компонент по сравнению с Вариантом A:
+  N вендоров = N разных схем авторизации,
+  требующих независимого управления жизненным
+  циклом токенов
+end note
+
+note right of health
+  Rate-limit -- риск, отсутствующий при
+  прямой интеграции: вендорские API могут
+  ограничивать частоту опроса/событий
+end note
+
+SHOW_LEGEND()
+@enduml

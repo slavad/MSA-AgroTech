@@ -1,0 +1,21 @@
+@startuml C2_Isolation_Schema_Per_Tenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Мультитенантность -- вариант 1: изоляция на уровне схем БД
+
+Container(app, "Application Tier", "Все сервисы платформы (не меняются между вариантами изоляции)")
+Container(provisioning_trigger, "Subscription & Plan Service", "Запускает онбординг нового тенанта")
+
+Container_Boundary(data, "Data Layer") {
+  Component(ctx, "Tenant Context Middleware", "Резолвит tenant_id из JWT/API key, выставляет search_path")
+  Component(schema_prov, "Schema Provisioning Service", "Создает схему + прогоняет миграции при онбординге")
+  ContainerDb(pg, "Shared PostgreSQL Cluster", "PostgreSQL", "Один движок БД, отдельная схема на тенанта")
+}
+
+Rel(app, ctx, "Запрос с tenant_id")
+Rel(ctx, pg, "SET search_path = tenant_x", "SQL")
+Rel(provisioning_trigger, schema_prov, "Новый тенант / апгрейд")
+Rel(schema_prov, pg, "CREATE SCHEMA + migrate")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,90 @@
+@startuml C4_Option_A_Protocol_Adapter
+title Camera Gateway -- C4 (код, Ruby)\nВариант A: Protocol Adapter Pool
+
+abstract class CameraAdapter {
+  +connect(config)
+  +read_frame
+  +status
+  +disconnect
+  --
+  Абстрактный класс: not_implemented
+  (базовый метод кидает NotImplementedError,
+  переопределяется в наследниках)
+}
+
+class OnvifRtspAdapter {
+  -rtsp_url
+  -onvif_client
+  +connect(config)
+  +read_frame
+  +status
+  +disconnect
+}
+
+class VendorXAdapter {
+  -quirks
+  +connect(config)
+  +read_frame
+  +status
+  +disconnect
+  -apply_vendor_x_workarounds
+}
+
+class VendorYAdapter {
+  -fisheye_correction
+  +connect(config)
+  +read_frame
+  +status
+  +disconnect
+  -correct_fisheye_distortion(frame)
+}
+
+class CameraConfig {
+  +camera_id
+  +vendor
+  +model
+  +stream_url
+  +credentials
+}
+
+class AdapterFactory {
+  +create_adapter(config)
+  -select_adapter_type(vendor, model)
+}
+
+class CameraRegistry {
+  -adapters
+  +register_camera(config)
+  +adapter_for(camera_id)
+  +active
+  +remove_camera(camera_id)
+}
+
+class Frame {
+  +camera_id
+  +timestamp
+  +data
+  +resolution
+}
+
+CameraAdapter <|-- OnvifRtspAdapter
+CameraAdapter <|-- VendorXAdapter
+CameraAdapter <|-- VendorYAdapter
+
+AdapterFactory --> CameraAdapter : creates
+AdapterFactory --> CameraConfig : reads
+CameraRegistry --> AdapterFactory : uses
+CameraRegistry --> CameraAdapter : holds
+CameraAdapter --> Frame : produces
+
+note right of AdapterFactory
+  Точка расширения под новый вендор камер
+  (НФТ2): добавить класс *Adapter < CameraAdapter
+  + одну ветку в select_adapter_type --
+  остальной Camera Gateway не меняется
+end note
+
+
+!include _legend.iuml
+
+@enduml

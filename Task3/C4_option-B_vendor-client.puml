@@ -1,0 +1,96 @@
+@startuml C4_Option_B_Vendor_Client
+title Camera Gateway -- C4 (код, Ruby)\nВариант B: Vendor SDK Client Pool
+
+abstract class VendorCameraClient {
+  +fetch_events(since)
+  +subscribe_webhook(callback_url)
+  +refresh_auth
+  +rate_limit_status
+  --
+  Абстрактный класс: not_implemented
+}
+
+class VendorXCloudClient {
+  -api_key
+  -base_url
+  +fetch_events(since)
+  +subscribe_webhook(callback_url)
+  +refresh_auth
+  +rate_limit_status
+}
+
+class VendorYCloudClient {
+  -oauth_token
+  +fetch_events(since)
+  +subscribe_webhook(callback_url)
+  +refresh_auth
+  +rate_limit_status
+}
+
+class VendorAuthTokenManager {
+  -tokens
+  +valid_token(vendor)
+  +refresh_if_expiring(vendor)
+  -schedule_refresh(vendor, expires_at)
+}
+
+class VendorClientFactory {
+  +create_client(vendor, config)
+}
+
+class VendorClientRegistry {
+  -clients
+  +register_vendor(config)
+  +client_for(vendor)
+  +active
+}
+
+class ResponseNormalizer {
+  +normalize(vendor, raw_payload)
+  -vendor_parsers
+}
+
+class VendorEvent {
+  +vendor
+  +camera_id
+  +timestamp
+  +raw_payload
+}
+
+class Frame {
+  +camera_id
+  +timestamp
+  +data
+  +resolution
+}
+
+VendorCameraClient <|-- VendorXCloudClient
+VendorCameraClient <|-- VendorYCloudClient
+
+VendorClientFactory --> VendorCameraClient : creates
+VendorClientRegistry --> VendorClientFactory : uses
+VendorClientRegistry --> VendorCameraClient : holds
+VendorCameraClient --> VendorAuthTokenManager : requests token from
+VendorCameraClient --> VendorEvent : produces
+ResponseNormalizer --> VendorEvent : consumes
+ResponseNormalizer --> Frame : produces
+
+note right of VendorAuthTokenManager
+  Не имеет аналога в Варианте A -- там
+  доверие устанавливается один раз при
+  ONVIF-подключении, а не per-vendor
+  OAuth-циклом с истечением токена
+end note
+
+note right of VendorClientFactory
+  Точка расширения под нового вендора
+  (НФТ2): новый *CloudClient < VendorCameraClient
+  + запись в VendorConfig -- но, в отличие
+  от Варианта A, добавляется еще и схема
+  авторизации в VendorAuthTokenManager
+end note
+
+
+!include _legend.iuml
+
+@enduml
